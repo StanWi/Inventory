@@ -2,7 +2,7 @@
 #Region ;**** Directives created by AutoIt3Wrapper_GUI ****
 #AutoIt3Wrapper_Icon=box1.ico
 #AutoIt3Wrapper_Res_Description=Inventory Database
-#AutoIt3Wrapper_Res_Fileversion=0.1.0.2
+#AutoIt3Wrapper_Res_Fileversion=0.1.0.3
 #AutoIt3Wrapper_Res_Language=1049
 #EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
 #include <GUIConstantsEx.au3>
@@ -1089,7 +1089,7 @@ Func _CheckLocation($location) ; Проверка существования у�
 	If $user_cte = 7 Then
 		$query = StringFormat("SELECT name FROM location WHERE name LIKE '%s';", $location)
 	Else
-		$query = StringFormat("SELECT name FROM location WHERE name LIKE '%s' AND cte = %u;", $location, $user_cte)
+		$query = StringFormat("SELECT name FROM location WHERE name LIKE '%s' AND cte = %u OR cte = 7;", $location, $user_cte)
 	EndIf
 	$aResult = _EzMySql_GetTable2d($query)
 	$iRows = _EzMySql_Rows()
