@@ -1089,7 +1089,7 @@ Func _CheckLocation($location) ; Проверка существования у�
 	If $user_cte = 7 Then
 		$query = StringFormat("SELECT name FROM location WHERE name LIKE '%s';", $location)
 	Else
-		$query = StringFormat("SELECT name FROM location WHERE name LIKE '%s' AND cte = %u OR cte = 7;", $location, $user_cte)
+		$query = StringFormat("SELECT name FROM location WHERE name LIKE '%s' AND (cte = %u OR cte = 7);", $location, $user_cte)
 	EndIf
 	$aResult = _EzMySql_GetTable2d($query)
 	$iRows = _EzMySql_Rows()

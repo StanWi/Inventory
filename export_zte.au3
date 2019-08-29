@@ -5,7 +5,7 @@
 #include <secret.au3>
 
 Global $aInventory
-Global $fileInventory = @ScriptDir & '\Export\ZTE\Engineering Equipment Information Export_20190814083734.csv'
+Global $fileInventory = @ScriptDir & '\Export\ZTE\Engineering Equipment Information Export_20190829113151.csv'
 Global $GMT = 8
 ;~ Workmode full access or readonly
 Global $mode = True
