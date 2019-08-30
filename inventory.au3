@@ -24,7 +24,7 @@ If Not _EzMySql_Startup() Then
 	Exit
 EndIf
 
-$test_mode = False
+$test_mode = True
 If Not $test_mode Then
 	$mysql_database = "idata"
 	$mysql_user = $mysql_user_work
@@ -180,6 +180,11 @@ Else
 	WinSetTitle($hWnd, '', StringFormat('%s - %s - %s - %s', $CompanyName, $aCte[0], $user_name, $ProgramName))
 EndIf
 
+$tools_working_time = GUICtrlCreateDummy()
+If $user_id = 1 Then
+	$tools_working_time = GUICtrlCreateMenuItem('Учёт рабочего времени', $ContextMenuTools)
+EndIf
+
 GUISetState(@SW_SHOW)
 GUIRegisterMsg($WM_NOTIFY, "WM_NOTIFY")
 
@@ -221,6 +226,8 @@ While 1
 			_ToolsStatistic()
 		Case $tools_equipment_in_work ; Распределение оборудования в работе по ЦТЭ
 			tools_equipment_in_work()
+		Case $tools_working_time ; Учёт рабочего времени
+			tools_working_time($user_id)
 	EndSwitch
 WEnd
 
@@ -389,12 +396,13 @@ Func _SetInfo()
 			_EzMySql_Query(StringFormat("SELECT id FROM vendor WHERE name LIKE '%s';", $vendor))
 			$vendor_id = _EzMySql_FetchData()
 		EndIf
-		$query = StringFormat("SELECT time, place, status, location, nomnum, invnum, nsz FROM inventory WHERE vendor = %u AND object LIKE '%s' AND serial LIKE '%s';", $vendor_id[0], $module, $sn)
+		$query = StringFormat("SELECT time, place, status, location, nomnum, invnum, nsz " & _
+				"FROM inventory WHERE vendor = %u AND object LIKE '%s' AND serial LIKE '%s';", $vendor_id[0], $module, $sn)
 		$aResult = _EzMySql_GetTable2d($query)
 		$iRows = _EzMySql_Rows()
 		If IsArray($aResult) And $iRows > 0 Then
-			GUICtrlSetData($ComboNN, $aResult[1][4], '')
-			GUICtrlSetData($ComboIN, $aResult[1][5], '')
+			GUICtrlSetData($ComboNN, $aResult[1][4], $aResult[1][4])
+			GUICtrlSetData($ComboIN, $aResult[1][5], $aResult[1][5])
 			Dim $ListViewItem[$iRows]
 			For $i = 1 To $iRows
 				$nsz = 'Нет'
@@ -403,7 +411,17 @@ Func _SetInfo()
 				EndIf
 				_EzMySql_Query(StringFormat("SELECT name FROM status WHERE id = %u;", $aResult[$i][2]))
 				$status = _EzMySql_FetchData()
-				$line = _EPOCH($aResult[$i][0]) & '|' & $vendor & '|' & $module & '|' & _GUICtrlComboBox_GetEditText($ComboSN) & '|' & $aResult[$i][4] & '|' & $aResult[$i][5] & '|' & $aResult[$i][1] & '|' & $status[0] & '|' & $nsz & '|' & $aResult[$i][3]
+				$line = StringFormat('%s|%s|%s|%s|%s|%s|%s|%s|%s|%s', _
+						_EPOCH($aResult[$i][0]), _                 ; date and time
+						$vendor, _                                 ; vendor
+						$module, _                                 ; equipment
+						_GUICtrlComboBox_GetEditText($ComboSN), _  ; serial number
+						$aResult[$i][4], _                         ; nom number
+						$aResult[$i][5], _                         ; inv number
+						$aResult[$i][1], _                         ; comment
+						$status[0], _                              ; status
+						$nsz, _                                    ; nsz
+						$aResult[$i][3]) ; location
 				$ListViewItem[$i - 1] = GUICtrlCreateListViewItem($line, $ListView)
 			Next
 			GUICtrlSetData($ButtonAdd, 'Переместить')
@@ -508,21 +526,20 @@ Func _Add() ; Add information in database.
 			Else
 				$InputAddSN = GUICtrlCreateLabel(_GUICtrlComboBox_GetEditText($ComboSN), 130, 70, 110, 21)
 			EndIf
-			;Поле номенклатурного номера
-			If _GUICtrlComboBox_GetEditText($ComboNN) = '' Or _GUICtrlComboBox_GetEditText($ComboSN) = '' Then
+			;Поля номенклатурного и инвентарного номеров
+			If (_GUICtrlComboBox_GetEditText($ComboNN) = '' And _GUICtrlComboBox_GetEditText($ComboIN) = '') Or _GUICtrlComboBox_GetEditText($ComboSN) = '' Then
 				$InputAddNN = GUICtrlCreateInput('', 300, 67, 55, 21)
-			Else
-				$InputAddNN = GUICtrlCreateLabel(_GUICtrlComboBox_GetEditText($ComboNN), 300, 70, 55, 21)
-			EndIf
-			;Поле инвертарного номера
-			If _GUICtrlComboBox_GetEditText($ComboIN) = '' Or _GUICtrlComboBox_GetEditText($ComboSN) = '' Then
 				$InputAddIN = GUICtrlCreateInput('', 415, 67, 55, 21)
 			Else
+				$InputAddNN = GUICtrlCreateLabel(_GUICtrlComboBox_GetEditText($ComboNN), 300, 70, 55, 21)
 				$InputAddIN = GUICtrlCreateLabel(_GUICtrlComboBox_GetEditText($ComboIN), 415, 70, 55, 21)
 			EndIf
 			;-----
 			$InputAddTime = GUICtrlCreateInput(_NowCalc(), 130, 97, 110, 21)
 			$InputAddComment = GUICtrlCreateInput('', 130, 127, 340, 21)
+			If _GUICtrlComboBox_GetEditText($ComboSN) Then
+				ControlFocus($hAddWnd, '', $InputAddComment)
+			EndIf
 			$ComboAddStatus = GUICtrlCreateCombo('', 130, 157, 169, 21)
 			$checkboxAddNSZ = GUICtrlCreateCheckbox('НСЗ', 309, 157, 41, 21)
 			$aResult = _EzMySql_GetTable2d("SELECT name FROM status ORDER BY name;")
@@ -1241,6 +1258,40 @@ Func tools_equipment_in_work()
 		_ArrayDisplay($aResult, StringFormat('Распределение: в работе по ЦТЭ - %s', $ProgramName))
 	EndIf
 EndFunc   ;==>tools_equipment_in_work
+
+Func tools_working_time($user_id)
+	Local $period = 31 * 24 * 60 * 60 ; 31 day to seconds
+	Local $stop_time = _DateDiff('s', "1970/01/01 00:00:00", _NowCalc())
+	Local $start_time = $stop_time - $period
+	Local $query = StringFormat("SELECT DISTINCT comp FROM log WHERE time > %u;", $start_time)
+	Local $comp = _EzMySql_GetTable2d($query)
+	Local $comp_len = _EzMySql_Rows()
+	Local $i, $update
+	If IsArray($aResult) And $comp_len > 0 Then
+		_ArrayDisplay($comp)
+		print($comp_len)
+		Local $result[$comp_len + 1][8]
+		$result[0][0] = 'N'
+		$result[0][1] = 'Подразделение'
+		$result[0][2] = 'Имя'
+		$result[0][3] = 'Кол-во сессий'
+		$result[0][4] = 'Общее время'
+		$result[0][5] = 'Внесено'
+		$result[0][6] = 'Обновлено'
+		$result[0][7] = 'Удалено'
+		For $i = 1 To $comp_len
+			$result[$i][0] = $i
+			$query = StringFormat("SELECT DISTINCT time FROM log WHERE time > %u AND comp = '%s' AND (request = 'Start' OR request = 'Stop');", $start_time, $comp[$i][0])
+			$query = StringFormat("SELECT COUNT(*) FROM log WHERE time > %u AND comp = '%s' AND request LIKE 'UPDATE %';", $start_time, $comp[$i][0])
+			_EzMySql_Query($query)
+			$update = _EzMySql_FetchData()
+			If $update <> 0 Then
+				$result[$i][6] = $update[0]
+			EndIf
+		Next
+	EndIf
+	_ArrayDisplay($result)
+EndFunc   ;==>tools_working_time
 
 Func layer_type_activate($type_id)
 	$aResult = _EzMySql_GetTable2d(StringFormat("SELECT option_id, name, list FROM options WHERE type_id = %u ORDER BY option_id;", $type_id))
