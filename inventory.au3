@@ -1,8 +1,9 @@
+;~ Check #NoTrayIcon, #AutoIt3Wrapper_Res_Fileversion, $test_mode
 #NoTrayIcon
 #Region ;**** Directives created by AutoIt3Wrapper_GUI ****
 #AutoIt3Wrapper_Icon=box1.ico
 #AutoIt3Wrapper_Res_Description=Inventory Database
-#AutoIt3Wrapper_Res_Fileversion=0.1.0.4
+#AutoIt3Wrapper_Res_Fileversion=0.1.0.5
 #AutoIt3Wrapper_Res_Language=1049
 #EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
 #include <GUIConstantsEx.au3>
@@ -19,12 +20,15 @@
 #include <EzMySql.au3>
 #include <secret.au3>
 
+$USER_WRITE = 1
+$USER_WORKTIME = 2
+
 If Not _EzMySql_Startup() Then
 	MsgBox(0, 'Error Starting MySql', 'Error: ' & @error & @CR & 'Error string: ' & _EzMySql_ErrMsg())
 	Exit
 EndIf
 
-$test_mode = True
+$test_mode = False
 If Not $test_mode Then
 	$mysql_database = "idata"
 	$mysql_user = $mysql_user_work
@@ -161,7 +165,7 @@ Else
 	$user_access = $aResult[1]
 	$user_cte = $aResult[2]
 	$user_name = $aResult[3]
-	If Not $user_access Then
+	If Not BitAND($USER_WRITE, $user_access) Then
 		GUICtrlSetState($ButtonAdd, $GUI_HIDE)
 		GUICtrlSetState($ButtonEdit, $GUI_HIDE)
 	EndIf
@@ -181,7 +185,7 @@ Else
 EndIf
 
 $tools_working_time = GUICtrlCreateDummy()
-If $user_id = 1 Then
+If BitAND($USER_WORKTIME, $user_access) Then
 	$tools_working_time = GUICtrlCreateMenuItem('Учёт рабочего времени', $ContextMenuTools)
 EndIf
 
@@ -227,7 +231,7 @@ While 1
 		Case $tools_equipment_in_work ; Распределение оборудования в работе по ЦТЭ
 			tools_equipment_in_work()
 		Case $tools_working_time ; Учёт рабочего времени
-			tools_working_time($user_id)
+			tools_working_time_gui($user_cte)
 	EndSwitch
 WEnd
 
@@ -285,7 +289,7 @@ Func _SetModule($item = "") ; Выполняется после выбора п�
 		$query = StringFormat("SELECT equip_id FROM equipment WHERE type_id = %u ORDER BY equip_id;", $vendor_id[0])
 	Else
 		$vendor_mode = True
-		If $user_access Then
+		If BitAND($USER_WRITE, $user_access) Then
 			GUICtrlSetState($ButtonAdd, $GUI_ENABLE)
 		EndIf
 		layer_type_deactivate()
@@ -305,7 +309,7 @@ EndFunc   ;==>_SetModule
 
 Func _SetSN($item = "") ; Run after select "Equipment" field
 	GUICtrlSetData($ButtonAdd, 'Добавить')
-	If $user_access Then
+	If BitAND($USER_WRITE, $user_access) Then
 		GUICtrlSetState($ButtonAdd, $GUI_ENABLE)
 	EndIf
 	_GUICtrlListView_DeleteAllItems($ListView)
@@ -426,7 +430,7 @@ Func _SetInfo()
 			Next
 			GUICtrlSetData($ButtonAdd, 'Переместить')
 			GUICtrlSetState($ButtonReport, $GUI_ENABLE)
-			If $user_access Then
+			If BitAND($USER_WRITE, $user_access) Then
 				GUICtrlSetState($ButtonEdit, $GUI_ENABLE)
 			EndIf
 		EndIf
@@ -1259,17 +1263,60 @@ Func tools_equipment_in_work()
 	EndIf
 EndFunc   ;==>tools_equipment_in_work
 
-Func tools_working_time($user_id)
-	Local $period = 31 * 24 * 60 * 60 ; 31 day to seconds
+Func tools_working_time_gui($user_cte)
+	Local $hWorkTimeWnd = GUICreate(StringFormat('Учёт рабочего времени - %s', $ProgramName), 800, 460, -1, -1, -1, -1, $hWnd)
+	GUICtrlCreateLabel('Период (дней)', 10, 16, 80, 21)
+	Local $PeriodWorkTime = GUICtrlCreateInput('31', 90, 13, 50, 22)
+	GUICtrlCreateUpdown($PeriodWorkTime)
+	Local $WorkTimeButton = GUICtrlCreateButton("Показать", 150, 9, 100, 28)
+	Local $WorkTimeListColumns = 'N|Подразделение|Имя|Кол-во сессий|Общее время|Внесено|Обновлено|Удалено'
+	Local $WorkTimeList = GUICtrlCreateListView($WorkTimeListColumns, 10, 50, 780, 400, BitOR($LVS_SHOWSELALWAYS, $LVS_SINGLESEL))
+
+	GUISetState(@SW_SHOW, $hWorkTimeWnd)
+	While 1
+		$workTimeMsg = GUIGetMsg()
+		Switch $workTimeMsg
+			Case $GUI_EVENT_CLOSE
+				ExitLoop
+			Case $WorkTimeButton
+				GUICtrlSetState($WorkTimeButton, $GUI_DISABLE)
+				If Int(GUICtrlRead($PeriodWorkTime)) <= 0 Then
+					GUICtrlSetData($PeriodWorkTime, 1)
+				EndIf
+				_GUICtrlListView_DeleteAllItems($WorkTimeList)
+				Local $result = tools_working_time($user_cte, Int(GUICtrlRead($PeriodWorkTime)))
+				For $k = 1 To $result[0][0]
+					$line = StringFormat('%s|%s|%s|%s|%s|%s|%s|%s', _
+							$result[$k][0], _
+							$result[$k][1], _
+							$result[$k][2], _
+							$result[$k][3], _
+							$result[$k][4], _
+							$result[$k][5], _
+							$result[$k][6], _
+							$result[$k][7])
+					GUICtrlCreateListViewItem($line, $WorkTimeList)
+				Next
+				GUICtrlSetState($WorkTimeButton, $GUI_ENABLE)
+		EndSwitch
+	WEnd
+	GUIDelete($hWorkTimeWnd)
+EndFunc   ;==>tools_working_time_gui
+
+Func tools_working_time($user_cte, $period_days)
+	Local $period = $period_days * 24 * 60 * 60 ; 31 day to seconds
 	Local $stop_time = _DateDiff('s', "1970/01/01 00:00:00", _NowCalc())
 	Local $start_time = $stop_time - $period
 	Local $query = StringFormat("SELECT DISTINCT comp FROM log WHERE time > %u;", $start_time)
+	If $user_cte <> 7 Then
+		$query = StringFormat("SELECT DISTINCT comp FROM log WHERE time > %u AND comp IN (SELECT comp FROM user WHERE cte = %u);", $start_time, $user_cte)
+	EndIf
 	Local $comp = _EzMySql_GetTable2d($query)
 	Local $comp_len = _EzMySql_Rows()
-	Local $i, $update
+	Local $i, $update, $user, $sessions, $sessions_len, $sessions_count, $sessions_time, $sessions_mode
+	Local $g_iHour, $g_iMins, $g_iSecs
 	If IsArray($aResult) And $comp_len > 0 Then
-		_ArrayDisplay($comp)
-		print($comp_len)
+;~ 		_ArrayDisplay($comp)
 		Local $result[$comp_len + 1][8]
 		$result[0][0] = 'N'
 		$result[0][1] = 'Подразделение'
@@ -1279,18 +1326,72 @@ Func tools_working_time($user_id)
 		$result[0][5] = 'Внесено'
 		$result[0][6] = 'Обновлено'
 		$result[0][7] = 'Удалено'
+		Local $k = 0
 		For $i = 1 To $comp_len
-			$result[$i][0] = $i
-			$query = StringFormat("SELECT DISTINCT time FROM log WHERE time > %u AND comp = '%s' AND (request = 'Start' OR request = 'Stop');", $start_time, $comp[$i][0])
-			$query = StringFormat("SELECT COUNT(*) FROM log WHERE time > %u AND comp = '%s' AND request LIKE 'UPDATE %';", $start_time, $comp[$i][0])
+			$query = StringFormat("SELECT name, (SELECT name FROM cte WHERE id = cte) FROM user WHERE comp = '%s';", $comp[$i][0])
 			_EzMySql_Query($query)
-			$update = _EzMySql_FetchData()
-			If $update <> 0 Then
-				$result[$i][6] = $update[0]
+			$user = _EzMySql_FetchData()
+			If $user <> 0 Then
+				$k += 1
+				$result[$k][0] = $k
+				$result[$k][1] = $user[1]
+				$result[$k][2] = $user[0]
+				$query = StringFormat("SELECT time, request FROM log WHERE time > %u AND comp = '%s' AND (request = 'Start' OR request = 'Stop');", $start_time, $comp[$i][0])
+				$sessions = _EzMySql_GetTable2d($query)
+				$sessions_len = _EzMySql_Rows()
+				If $sessions[1][1] <> 'Start' Then
+					$sessions_len = _ArrayInsert($sessions, 1, StringFormat('%u|Start', $start_time))
+					$sessions_len -= 1
+				EndIf
+				If $sessions[$sessions_len][1] <> 'Stop' Then
+					$sessions_len = _ArrayAdd($sessions, StringFormat('%u|Stop', $stop_time))
+				EndIf
+				$sessions_time = $sessions[$sessions_len][0]
+				$sessions_count = 0
+				$sessions_mode = 'Stop'
+				For $j = $sessions_len To 1 Step -1
+					If $sessions[$j][1] = $sessions_mode Then
+						ContinueLoop
+					Else
+						If $sessions[$j][1] = 'Start' Then
+							$sessions_time -= $sessions[$j][0]
+							$sessions_count += 1
+						Else
+							$sessions_time += $sessions[$j][0]
+						EndIf
+						$sessions_mode = $sessions[$j][1]
+					EndIf
+				Next
+				_TicksToTime($sessions_time * 1000, $g_iHour, $g_iMins, $g_iSecs)
+				$result[$k][3] = $sessions_count
+				$result[$k][4] = StringFormat("%02i:%02i:%02i", $g_iHour, $g_iMins, $g_iSecs)
+				$query = StringFormat("SELECT COUNT(*) FROM log WHERE time > %u AND comp = '%s' AND request LIKE 'INSERT %';", $start_time, $comp[$i][0])
+				_EzMySql_Query($query)
+				$update = _EzMySql_FetchData()
+				If $update <> 0 Then
+					$result[$k][5] = $update[0]
+				EndIf
+				$query = StringFormat("SELECT COUNT(*) FROM log WHERE time > %u AND comp = '%s' AND request LIKE 'UPDATE %';", $start_time, $comp[$i][0])
+				_EzMySql_Query($query)
+				$update = _EzMySql_FetchData()
+				If $update <> 0 Then
+					$result[$k][6] = $update[0]
+				EndIf
+				$query = StringFormat("SELECT COUNT(*) FROM log WHERE time > %u AND comp = '%s' AND request LIKE 'DELETE %';", $start_time, $comp[$i][0])
+				_EzMySql_Query($query)
+				$update = _EzMySql_FetchData()
+				If $update <> 0 Then
+					$result[$k][7] = $update[0]
+				EndIf
+			Else
+				Sleep(0)
+;~ 				print($comp[$i][0]) ; Not registerd users
 			EndIf
 		Next
 	EndIf
-	_ArrayDisplay($result)
+	$result[0][0] = $k
+	Return $result
+;~ 	_ArrayDisplay($result)
 EndFunc   ;==>tools_working_time
 
 Func layer_type_activate($type_id)
