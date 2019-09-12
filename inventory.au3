@@ -3,7 +3,7 @@
 #Region ;**** Directives created by AutoIt3Wrapper_GUI ****
 #AutoIt3Wrapper_Icon=box1.ico
 #AutoIt3Wrapper_Res_Description=Inventory Database
-#AutoIt3Wrapper_Res_Fileversion=0.1.0.5
+#AutoIt3Wrapper_Res_Fileversion=0.1.0.6
 #AutoIt3Wrapper_Res_Language=1049
 #EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
 #include <GUIConstantsEx.au3>
@@ -272,32 +272,33 @@ Func _SetModule($item = "") ; Выполняется после выбора п�
 	; Stop funny
 	GUICtrlSetData($ComboModule, '') ; Устанавливаем значение в поле "Оборудование"
 	GUICtrlSetData($ComboModule, $wait, $wait)
-	;<=== 20170315
+	; <=== 20170315
 	GUICtrlSetData($ComboSN, '') ; Поле "Серийный №"
 	GUICtrlSetData($InputNumber, '') ; Поле "Количество"
 	GUICtrlSetData($ComboNN, '') ; Поле "Ном. №"
 	GUICtrlSetData($ComboIN, '') ; Поле "Инв. №"
 	_GUICtrlListView_DeleteAllItems($ListView) ; Очищаем список оборудования
-	_EzMySql_Query(StringFormat("SELECT id FROM vendor WHERE name LIKE '%s';", $vendor))
+	If BitAND($USER_WRITE, $user_access) Then
+		GUICtrlSetState($ButtonAdd, $GUI_ENABLE)
+	EndIf
+	_EzMySql_Query(StringFormat("SELECT id FROM vendor WHERE name = '%s';", $vendor))
 	$vendor_id = _EzMySql_FetchData()
 	; Type or vendor
-	If IsArray($vendor_id) And $vendor_id[0] > 1000 Then
-		$vendor_mode = False
-		GUICtrlSetState($ButtonAdd, $GUI_DISABLE)
-		layer_type_deactivate()
-		layer_type_activate($vendor_id[0])
-		$query = StringFormat("SELECT equip_id FROM equipment WHERE type_id = %u ORDER BY equip_id;", $vendor_id[0])
-	Else
-		$vendor_mode = True
-		If BitAND($USER_WRITE, $user_access) Then
-			GUICtrlSetState($ButtonAdd, $GUI_ENABLE)
-		EndIf
-		layer_type_deactivate()
-		If $user_cte = 7 Then
-			$query = StringFormat("SELECT DISTINCT object FROM inventory WHERE vendor = %u ORDER BY object;", $vendor_id[0])
+	If IsArray($vendor_id) Then
+		If $vendor_id[0] > 1000 Then
+			$vendor_mode = False
+			layer_type_deactivate()
+			layer_type_activate($vendor_id[0])
+			$query = StringFormat("SELECT equip_id FROM equipment WHERE type_id = %u ORDER BY equip_id;", $vendor_id[0])
 		Else
-			; Запрос типов оборудования с которыми знаком ЦТЭ
-			$query = StringFormat("SELECT DISTINCT object FROM inventory WHERE vendor = %u AND location IN (SELECT name FROM location WHERE cte = %u OR cte = 7) ORDER BY object;", $vendor_id[0], $user_cte)
+			$vendor_mode = True
+			layer_type_deactivate()
+			If $user_cte = 7 Then
+				$query = StringFormat("SELECT DISTINCT object FROM inventory WHERE vendor = %u ORDER BY object;", $vendor_id[0])
+			Else
+				; Запрос типов оборудования с которыми знаком ЦТЭ
+				$query = StringFormat("SELECT DISTINCT object FROM inventory WHERE vendor = %u AND location IN (SELECT name FROM location WHERE cte = %u OR cte = 7) ORDER BY object;", $vendor_id[0], $user_cte)
+			EndIf
 		EndIf
 	EndIf
 	$aResult = _EzMySql_GetTable2d($query)
@@ -346,6 +347,9 @@ Func _SetSN($item = "") ; Run after select "Equipment" field
 				Return 0
 			EndIf
 		EndIf
+	EndIf
+	If Not IsArray($vendor_id) Then
+		Return 0
 	EndIf
 	; ===== Запрос серийных номеров =====
 	If $user_cte = 7 Then
@@ -455,7 +459,19 @@ Func _Authorize()
 	EndIf
 EndFunc   ;==>_Authorize
 
-Func _Add() ; Add information in database.
+Func _Add()
+	Local $vendor = _GUICtrlComboBox_GetEditText($ComboVendor)
+	Local $query = StringFormat("SELECT id FROM vendor WHERE name = '%s';", $vendor)
+	_EzMySql_Query($query)
+	$vendor_id = _EzMySql_FetchData()
+	If IsArray($vendor_id) And $vendor_id[0] > 1000 Then
+		add_type($vendor_id)
+	Else
+		add_module()
+	EndIf
+EndFunc   ;==>_Add
+
+Func add_module() ; Add information in database
 	#cs
 		Function adds information in the database from dialog window
 	#ce
@@ -463,7 +479,7 @@ Func _Add() ; Add information in database.
 	Local $module = _GUICtrlComboBox_GetEditText($ComboModule)
 	If $vendor Then
 		If _CheckVendor($vendor) Then
-			_EzMySql_Query(StringFormat("SELECT id FROM vendor WHERE name LIKE '%s';", $vendor))
+			_EzMySql_Query(StringFormat("SELECT id FROM vendor WHERE name = '%s';", $vendor))
 			$vendor_id = _EzMySql_FetchData()
 			; Type or vendor
 			$height = 230
@@ -644,7 +660,183 @@ Func _Add() ; Add information in database.
 				'введите в поле "Тип или производитель" название нового вендора.')
 		ControlFocus($hWnd, '', $ComboVendor)
 	EndIf
-EndFunc   ;==>_Add
+EndFunc   ;==>add_module
+
+Func add_type($vendor_id)
+	Local $module = _GUICtrlComboBox_GetEditText($ComboModule)
+	If $module Then
+		$string = StringSplit($module, ' ')
+		$module = _ArrayPop($string)
+		$vendor = _ArrayToString($string, ' ', 1)
+		_EzMySql_Query(StringFormat("SELECT id FROM vendor WHERE name = '%s';", $vendor))
+		$vendor_id = _EzMySql_FetchData() ; array
+	Else
+		$module = ''
+		$vendor = ''
+	EndIf
+	Local $hAddWnd = GUICreate(StringFormat('Добавление - %s', $ProgramName), 480, 310, -1, -1, -1, -1, $hWnd)
+	GUICtrlCreateLabel('Производитель', 10, 10, 110, 21)
+	GUICtrlCreateLabel('Карта/Модуль', 10, 40, 110, 21)
+	GUICtrlCreateLabel('Серийный номер', 10, 70, 110, 21)
+	GUICtrlCreateLabel('Ном. №', 250, 70, 40, 21)
+	GUICtrlCreateLabel('Инв. №', 365, 70, 40, 21)
+	GUICtrlCreateLabel('Дата и время', 10, 100, 110, 21)
+	GUICtrlCreateLabel('Комментарий', 10, 130, 110, 21)
+	GUICtrlCreateLabel('Статус', 10, 160, 110, 21)
+	GUICtrlCreateLabel('Площадка', 10, 190, 110, 21)
+	GUICtrlCreateGroup('Параметры', 10, 220, 460, 80)
+	Local $params = ''
+	For $i = 0 To $number_options - 1
+		If _GUICtrlComboBox_GetEditText($ComboOptions[$i]) <> '' Then
+			$params &= GUICtrlRead($LabelOptions[$i]) & ': ' & _GUICtrlComboBox_GetEditText($ComboOptions[$i]) & '; '
+		EndIf
+	Next
+	If Not $params Then
+		If GUICtrlRead($LabelOptions[0]) Then
+			MsgBox(0, StringFormat('Сообщение - %s', $ProgramName), StringFormat('Установите парамеры оборудования (%s, %s, ...)', GUICtrlRead($LabelOptions[0]), GUICtrlRead($LabelOptions[1])), 5)
+		EndIf
+		Return
+	EndIf
+	$params = StringTrimRight($params, 2)
+	$LabelAddOptions = GUICtrlCreateLabel($params, 20, 240, 440, 50)
+	; Поле вендора
+	If $vendor Then
+		$LabelAddVendor = GUICtrlCreateLabel($vendor, 130, 10, 225, 21)
+	Else
+		$LabelAddVendor = GUICtrlCreateCombo("", 130, 7, 225, 21)
+		$query = StringFormat("SELECT equip_id FROM equipment WHERE type_id = %u;", $vendor_id[0])
+		$equip_id = _EzMySql_GetTable2d($query)
+		Local $equip_id_unique[1]
+		$equip_id_unique[0] = ''
+		$k = 0
+		For $i = 1 To UBound($equip_id) - 1
+			$string = StringSplit($equip_id[$i][0], ' ')
+			_ArrayPop($string)
+			$tmp = _ArrayToString($string, ' ', 1)
+			If $equip_id_unique[$k] <> $tmp Then
+				_ArrayAdd($equip_id_unique, $tmp)
+				$k += 1
+			EndIf
+		Next
+		GUICtrlSetData($LabelAddVendor, _ArrayToString($equip_id_unique, '|', 1), '')
+	EndIf
+	; Поле модуля
+	If $module Then
+		$LabelAddObject = GUICtrlCreateLabel($module, 130, 40, 340, 21)
+	Else
+		$LabelAddObject = GUICtrlCreateInput("", 130, 37, 225, 21)
+	EndIf
+	; Поле серийного номера
+	If _GUICtrlComboBox_GetEditText($ComboSN) = '' Then
+		$InputAddSN = GUICtrlCreateInput('', 130, 67, 110, 21)
+	Else
+		$InputAddSN = GUICtrlCreateLabel(_GUICtrlComboBox_GetEditText($ComboSN), 130, 70, 110, 21)
+	EndIf
+	; Поля номенклатурного и инвентарного номеров
+	If (_GUICtrlComboBox_GetEditText($ComboNN) = '' And _GUICtrlComboBox_GetEditText($ComboIN) = '') Or _GUICtrlComboBox_GetEditText($ComboSN) = '' Then
+		$InputAddNN = GUICtrlCreateInput('', 300, 67, 55, 21)
+		$InputAddIN = GUICtrlCreateInput('', 415, 67, 55, 21)
+	Else
+		$InputAddNN = GUICtrlCreateLabel(_GUICtrlComboBox_GetEditText($ComboNN), 300, 70, 55, 21)
+		$InputAddIN = GUICtrlCreateLabel(_GUICtrlComboBox_GetEditText($ComboIN), 415, 70, 55, 21)
+	EndIf
+	$InputAddTime = GUICtrlCreateInput(_NowCalc(), 130, 97, 110, 21)
+	$InputAddComment = GUICtrlCreateInput('', 130, 127, 340, 21)
+	If _GUICtrlComboBox_GetEditText($ComboSN) Then
+		ControlFocus($hAddWnd, '', $InputAddComment)
+	EndIf
+	$ComboAddStatus = GUICtrlCreateCombo('', 130, 157, 169, 21)
+	$checkboxAddNSZ = GUICtrlCreateCheckbox('НСЗ', 309, 157, 41, 21)
+	$aResult = _EzMySql_GetTable2d("SELECT name FROM status ORDER BY name;")
+	If IsArray($aResult) And _EzMySql_Rows() > 0 Then
+		GUICtrlSetData($ComboAddStatus, _ArrayToString($aResult, '', 1, -1, '|'))
+	EndIf
+	$ComboAddLocation = GUICtrlCreateCombo('', 130, 187, 220, 21)
+	If $user_cte = 7 Then
+		$query = "SELECT DISTINCT name FROM location ORDER BY name;"
+	Else
+		$query = StringFormat("SELECT DISTINCT name FROM location WHERE cte = %u OR cte = 7 ORDER BY name;", $user_cte)
+	EndIf
+	$aResult = _EzMySql_GetTable2d($query)
+	If IsArray($aResult) And _EzMySql_Rows() > 0 Then
+		GUICtrlSetData($ComboAddLocation, _ArrayToString($aResult, '', 1, -1, '|'))
+	EndIf
+	Local $ButtonAddAdd = GUICtrlCreateButton('Добавить', 360, 178, 110, 31)
+	GUISetState(@SW_SHOW, $hAddWnd)
+	While 1
+		$addMsg = GUIGetMsg()
+		Switch $addMsg
+			Case $GUI_EVENT_CLOSE
+				ExitLoop
+			Case $ButtonAddAdd
+				$nsz = 0
+				If GUICtrlRead($checkboxAddNSZ) = $GUI_CHECKED Then
+					$nsz = 1
+				EndIf
+				If GUICtrlRead($LabelAddVendor) <> '' And GUICtrlRead($LabelAddObject) <> '' _
+						And GUICtrlRead($InputAddSN) <> '' And GUICtrlRead($InputAddTime) <> '' _
+						And _GUICtrlComboBox_GetEditText($ComboAddStatus) <> '' And _GUICtrlComboBox_GetEditText($ComboAddLocation) <> '' Then
+					If _CheckLocation(_GUICtrlComboBox_GetEditText($ComboAddLocation)) And _CheckVendor(GUICtrlRead($LabelAddVendor), _GUICtrlComboBox_GetEditText($ComboVendor)) Then
+						check_params(GUICtrlRead($LabelAddVendor), StringReplace(GUICtrlRead($LabelAddObject), " ", "_"), $params)
+						If _GUICtrlComboBox_GetEditText($ComboSN) = '' Then ; Adding new equipment
+							$query = StringFormat("SELECT serial FROM inventory WHERE vendor = (SELECT id FROM vendor WHERE name LIKE '%s') AND serial LIKE '%s';", GUICtrlRead($LabelAddVendor), GUICtrlRead($InputAddSN))
+							$aResult = _EzMySql_GetTable2d($query)
+							If IsArray($aResult) And _EzMySql_Rows() > 0 And GUICtrlRead($InputAddSN) <> 'б/н' Then
+								MsgBox(0, StringFormat('Сообщение - %s', $ProgramName), 'Оборудование с таким серийным номером уже есть в базе.')
+							Else
+								$query = StringFormat("INSERT INTO inventory (time, vendor, object, serial, place, status, user, location, nomnum, invnum, nsz) " & _
+										"VALUES (%u, (SELECT id FROM vendor WHERE name LIKE '%s'), '%s', '%s', '%s', (SELECT id FROM status WHERE name LIKE '%s'), %u, '%s', '%s', '%s', %u);", _
+										_toEPOCH(GUICtrlRead($InputAddTime)), _					; time
+										GUICtrlRead($LabelAddVendor), _							; vendor
+										StringReplace(GUICtrlRead($LabelAddObject), " ", "_"), _; object
+										GUICtrlRead($InputAddSN), _								; serial
+										GUICtrlRead($InputAddComment), _						; place
+										_GUICtrlComboBox_GetEditText($ComboAddStatus), _ 		; status
+										$user_id, _												; user
+										_GUICtrlComboBox_GetEditText($ComboAddLocation), _ 		; location
+										GUICtrlRead($InputAddNN), _								; nomnum
+										GUICtrlRead($InputAddIN), _								; invnum
+										$nsz) ; nsz
+								_log($query)
+								_EzMySql_Exec($query)
+								_SetInfo()
+								If _GUICtrlComboBox_GetEditText($ComboSN) = '' Then
+									_SetSN()
+								EndIf
+								ExitLoop
+							EndIf
+						Else ; Move the equipment
+							$query = StringFormat("INSERT INTO inventory (time, vendor, object, serial, place, status, user, location, nomnum, invnum, nsz) " & _
+									"VALUES (%u, (SELECT id FROM vendor WHERE name LIKE '%s'), '%s', '%s', '%s', (SELECT id FROM status WHERE name LIKE '%s'), %u, '%s', '%s', '%s', %u);", _
+									_toEPOCH(GUICtrlRead($InputAddTime)), _					; time
+									GUICtrlRead($LabelAddVendor), _							; vendor
+									StringReplace(GUICtrlRead($LabelAddObject), " ", "_"), _; object
+									GUICtrlRead($InputAddSN), _								; serial
+									GUICtrlRead($InputAddComment), _						; place
+									_GUICtrlComboBox_GetEditText($ComboAddStatus), _ 		; status
+									$user_id, _												; user
+									_GUICtrlComboBox_GetEditText($ComboAddLocation), _ 		; location
+									GUICtrlRead($InputAddNN), _								; nomnum
+									GUICtrlRead($InputAddIN), _								; invnum
+									$nsz) ; nsz
+							_log($query)
+							_EzMySql_Exec($query)
+							_SetInfo()
+							If _GUICtrlComboBox_GetEditText($ComboSN) = '' Then
+								_SetSN()
+							EndIf
+							ExitLoop
+						EndIf
+					EndIf
+				ElseIf GUICtrlRead($InputAddSN) = '' Then
+					MsgBox(0, StringFormat('Сообщение - %s', $ProgramName), 'Введите серийный номер устройства.')
+				Else
+					MsgBox(0, StringFormat('Сообщение - %s', $ProgramName), 'Поля Статус и Площадка должны быть заполнены.')
+				EndIf
+		EndSwitch
+	WEnd
+	GUIDelete($hAddWnd)
+EndFunc   ;==>add_type
 
 Func _Edit() ; Edit information in database.
 	Local $data = GUICtrlRead(GUICtrlRead($ListView)) ; Twice. Once - some number, like '101'. Twice string with '|'.
@@ -1013,7 +1205,7 @@ Func _Filter($hist = False)
 		Else
 			$request = 'SELECT tab1.time, (SELECT name FROM vendor WHERE id = tab1.vendor), tab1.object, tab1.serial, tab1.place, (SELECT name FROM status WHERE id = tab1.status), tab1.user, tab1.location, tab1.invnum, tab1.nomnum, tab1.nsz FROM inventory tab1 INNER JOIN (SELECT MAX(time) as now, serial, object FROM inventory WHERE serial ' & $serial & ' AND object ' & $object & ' GROUP BY serial, object) tab2 ON (tab1.serial = tab2.serial AND tab1.time = tab2.now AND tab1.object = tab2.object) WHERE tab1.vendor ' & $vendor & ' AND tab1.object ' & $object & ' AND tab1.status ' & $status & ' AND tab1.invnum ' & $invnum & ' AND tab1.nomnum ' & $nomnum & ' AND tab1.nsz ' & $nsz & ' AND tab1.location ' & $location & ' AND location IN (SELECT name FROM location WHERE cte = ' & $user_cte & ' OR cte = 7) ORDER BY tab1.object;'
 		EndIf
-		print($request)
+;~ 		print($request)
 		$aResult = _EzMySql_GetTable2d($request)
 		$iRows = _EzMySql_Rows()
 		If IsArray($aResult) And $iRows > 0 Then
@@ -1033,7 +1225,7 @@ Func _Filter($hist = False)
 		EndIf
 	EndIf
 	GUICtrlSetState($ButtonFilter, $GUI_ENABLE)
-	print(TimerDiff($timer) & ' < _Filter()')
+;~ 	print(TimerDiff($timer) & ' < _Filter()')
 EndFunc   ;==>_Filter
 
 Func WM_NOTIFY($hWnd, $iMsg, $wParam, $lParam)
@@ -1136,10 +1328,10 @@ Func _CheckLocation($location) ; Проверка существования у�
 	Return $result
 EndFunc   ;==>_CheckLocation
 
-Func _CheckVendor($vendor) ; Проверка существования производителя оборудования и вопрос на добавление нового.
+Func _CheckVendor($vendor, $default = '') ; Проверка существования производителя оборудования и вопрос на добавление нового.
 	Local $result = False
 	Local $dialog
-	$aResult = _EzMySql_GetTable2d(StringFormat("SELECT name FROM vendor WHERE name LIKE '%s';", $vendor))
+	$aResult = _EzMySql_GetTable2d(StringFormat("SELECT name FROM vendor WHERE name = '%s';", $vendor))
 	$iRows = _EzMySql_Rows()
 	If IsArray($aResult) And $iRows = 0 Then
 		$dialog = MsgBox(292, StringFormat('Сообщение - %s', $ProgramName), 'Производителя "' & $vendor & '" нет в базе данных.' & @CRLF & 'Вы хотите добавить нового производителя?') ; 4 Yes and No, 32 Question-mark icon, 256 Second button is default button
@@ -1154,7 +1346,7 @@ Func _CheckVendor($vendor) ; Проверка существования про�
 				_EzMySql_Exec($query)
 				$aResult = _EzMySql_GetTable2d("SELECT name FROM vendor ORDER BY name;")
 				GUICtrlSetData($ComboVendor, '')
-				GUICtrlSetData($ComboVendor, _ArrayToString($aResult, '', 1, -1, '|'))
+				GUICtrlSetData($ComboVendor, _ArrayToString($aResult, '', 1, -1, '|'), $default)
 				$result = True
 			EndIf
 		EndIf
@@ -1257,7 +1449,7 @@ Func tools_equipment_in_work()
 			') tall' & @CRLF & _
 			'GROUP BY object ORDER BY `Производитель`, `Оборудование`;'
 	$aResult = _EzMySql_GetTable2d($query)
-	print(TimerDiff($timer) & ' < tools_equipment_in_work()')
+;~ 	print(TimerDiff($timer) & ' < tools_equipment_in_work()')
 	If IsArray($aResult) Then
 		_ArrayDisplay($aResult, StringFormat('Распределение: в работе по ЦТЭ - %s', $ProgramName))
 	EndIf
@@ -1521,12 +1713,15 @@ Func check_params($vendor, $module, $params)
 				EndIf
 			EndIf
 		Else
-			_EzMySql_Query(StringFormat('SELECT id FROM vendor WHERE name LIKE "%s";', _GUICtrlComboBox_GetEditText($ComboVendor)))
+			_EzMySql_Query(StringFormat("SELECT id FROM vendor WHERE name = '%s';", _GUICtrlComboBox_GetEditText($ComboVendor)))
 			$type_id = _EzMySql_FetchData()
 			$params_dict = string_to_dict_string($params, $type_id[0])
-			$query = StringFormat("INSERT INTO equipment (equip_id, type_id, options) VALUES ('%s %s', %u, '%s');", $vendor, $module, $type_id[0], $params_dict)
-			_log($query)
-			_EzMySql_Exec($query)
+			If _CheckVendor($vendor) Then
+				$query = StringFormat("INSERT INTO equipment (equip_id, type_id, options) VALUES ('%s %s', %u, '%s');", $vendor, $module, $type_id[0], $params_dict)
+;~ 				print($query)
+				_log($query)
+				_EzMySql_Exec($query)
+			EndIf
 		EndIf
 	EndIf
 	Return $result

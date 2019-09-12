@@ -1,6 +1,8 @@
+__pycache__
 Export
 Production
 *.dll
 *.ex?
 *.zip
 secret.au3
+*.py
