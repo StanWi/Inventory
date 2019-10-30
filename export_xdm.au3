@@ -5,7 +5,7 @@
 #include <secret.au3>
 
 Global $aInventory
-Global $fileInventory = @ScriptDir & '\Export\XDM\Inventory_190821'
+Global $fileInventory = @ScriptDir & '\Export\XDM\Inventory_191022'
 Global $GMT = 8
 ;~ Workmode full access or readonly
 Global $mode = True

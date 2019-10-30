@@ -994,7 +994,7 @@ Func _Report()
 			ConsoleWrite('No file was saved.' & @CRLF)
 		Else
 			ConsoleWrite($path & @CRLF)
-			Local $hFileOpen = FileOpen($path, 514)
+			Local $hFileOpen = FileOpen($path, 514) ; $FO_OVERWRITE (2) + $FO_ANSI (512)
 			If $hFileOpen = -1 Then
 				ConsoleWrite('An error occurred when reading the file.' & @CRLF)
 				Return False
